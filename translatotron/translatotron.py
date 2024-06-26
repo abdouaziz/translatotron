@@ -3,7 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import MultiheadAttention
 from torchaudio.transforms import GriffinLim
-from IPython.display import Audio
+
+
 
 class BLSTM(nn.Module):
     def __init__(self, input_size, hidden_size, num_layers=8):
@@ -100,8 +101,17 @@ class DecoderWaveforme(nn.Module):
 
 
 class Translatotron(nn.Module):
-    def __init__(self, input_size, hidden_size, num_layers=8, feature_size=10 , 
-                n_fft=512, win_length=400, hop_length=160, power=2):
+    def __init__(
+        self,
+        input_size,
+        hidden_size,
+        num_layers=8,
+        feature_size=10,
+        n_fft=512,
+        win_length=400,
+        hop_length=160,
+        power=2,
+    ):
         super(Translatotron, self).__init__()
         self.encoder = BLSTM(input_size, hidden_size, num_layers)
         self.speaker_encoder = SpeakerEncoder(hidden_size * 2, feature_size * 2)
@@ -132,11 +142,3 @@ class Translatotron(nn.Module):
         wave = self.griffin_lim(x.transpose(1, 2))
 
         return wave, phonem_A, phonem_B
-
-
-if __name__ == "__main__":
-    model = Translatotron(input_size=40, hidden_size=10)
-    x = torch.randn(10, 40, 40)
-    wave, phonem_A, phonem_B = model(x)
-    print(wave)
- 
