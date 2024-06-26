@@ -1,0 +1,1 @@
+from translatotron.translatotron import Translatotron

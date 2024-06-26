@@ -100,7 +100,8 @@ class DecoderWaveforme(nn.Module):
 
 
 class Translatotron(nn.Module):
-    def __init__(self, input_size, hidden_size, num_layers=8, feature_size=10):
+    def __init__(self, input_size, hidden_size, num_layers=8, feature_size=10 , 
+                n_fft=512, win_length=400, hop_length=160, power=2):
         super(Translatotron, self).__init__()
         self.encoder = BLSTM(input_size, hidden_size, num_layers)
         self.speaker_encoder = SpeakerEncoder(hidden_size * 2, feature_size * 2)
@@ -110,7 +111,7 @@ class Translatotron(nn.Module):
         self.pre_grif = nn.Linear(40, 257)
 
         self.griffin_lim = GriffinLim(
-            n_fft=512, win_length=400, hop_length=160, power=2
+            n_fft=n_fft, win_length=win_length, hop_length=hop_length, power=power
         )
 
     def forward(self, x, speaker_embedding=None):
