@@ -99,9 +99,9 @@ class Translatotron(nn.Module):
         return waveform, aux_source, aux_target
 
     @classmethod
-    def from_pretrained(cls, model_path, device='cpu'):
- 
-        if not model_path.endswith('.pth'):
+    def from_pretrained(cls, model_path, device="cpu"):
+
+        if not model_path.endswith(".pth"):
             raise ValueError("Model path should have a .pth extension")
 
         if not os.path.exists(model_path):
@@ -111,13 +111,13 @@ class Translatotron(nn.Module):
         state_dict = torch.load(model_path, map_location=device)
 
         # Extract model parameters from the state dict
-        model_params = state_dict.get('model_params', {})
+        model_params = state_dict.get("model_params", {})
 
         # Create a new model instance with the saved parameters
         model = cls(**model_params)
 
         # Load the model weights
-        model.load_state_dict(state_dict['model_state_dict'])
+        model.load_state_dict(state_dict["model_state_dict"])
 
         model.to(device)
         model.eval()  # Set the model to evaluation mode
@@ -125,31 +125,27 @@ class Translatotron(nn.Module):
         return model
 
     def save_pretrained(self, save_directory, model_name="translatotron_model"):
- 
+
         os.makedirs(save_directory, exist_ok=True)
         save_path = os.path.join(save_directory, f"{model_name}.pth")
 
         # Prepare the state dict with both the model parameters and weights
         state_dict = {
-            'model_params': {
-                'input_size': self.encoder.layer.input_size,
-                'encoder_hidden_size': self.encoder.layer.hidden_size,
-                'encoder_num_layers': self.encoder.layer.num_layers,
-                'decoder_hidden_size': self.decoder.hidden_size,
-                'decoder_num_layers': self.decoder.num_layers,
-                'aux_decoder_hidden_size': self.aux_decoder.lstm.hidden_size,
-                'aux_decoder_num_layers': self.aux_decoder.lstm.num_layers,
-                'aux_decoder_source_target_size': self.aux_decoder.source_projection.out_features,
-                'dropout_prob': self.encoder.layer.dropout,
-                'n_fft': self.griffin_lim.n_fft,
-                'win_length': self.griffin_lim.win_length,
-                'hop_length': self.griffin_lim.hop_length,
+            "model_params": {
+                "input_size": self.encoder.layer.input_size,
+                "encoder_hidden_size": self.encoder.layer.hidden_size,
+                "encoder_num_layers": self.encoder.layer.num_layers,
+                "decoder_hidden_size": self.decoder.hidden_size,
+                "decoder_num_layers": self.decoder.num_layers,
+                "aux_decoder_hidden_size": self.aux_decoder.lstm.hidden_size,
+                "aux_decoder_num_layers": self.aux_decoder.lstm.num_layers,
+                "aux_decoder_source_target_size": self.aux_decoder.source_projection.out_features,
+                "dropout_prob": self.encoder.layer.dropout,
+                "n_fft": self.griffin_lim.n_fft,
+                "win_length": self.griffin_lim.win_length,
+                "hop_length": self.griffin_lim.hop_length,
             },
-            'model_state_dict': self.state_dict()
+            "model_state_dict": self.state_dict(),
         }
-        
-        print(state_dict)
-
         # Save the state dict
         torch.save(state_dict, save_path)
-        print(f"Model saved to {save_path}")

@@ -2,14 +2,10 @@
 
 This project implements the Translatotron model, a sequence-to-sequence approach for direct speech-to-speech translation without relying on intermediate text representations. The implementation is based on the paper "Direct speech-to-speech translation with a sequence-to-sequence model" by Ye Jia et al.
 
+
 <p align="center">
-  <img src="https://drive.google.com/file/d/1diUEg5BasgP82wsoHMNw4mWh7rqiBt-n/preview" width="540" height="280">
+  <img src="s2st.png" width="540" height="280">
 </p>
-
-
-display this "https://drive.google.com/file/d/1diUEg5BasgP82wsoHMNw4mWh7rqiBt-n/preview" in the README.md file
-
-<>
  
 ## Introduction
 
