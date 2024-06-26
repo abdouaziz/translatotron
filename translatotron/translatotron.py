@@ -1,144 +1,130 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.nn import MultiheadAttention
 from torchaudio.transforms import GriffinLim
-
+from IPython.display import Audio
 
 
 class BLSTM(nn.Module):
-    def __init__(self, input_size, hidden_size, num_layers=8):
+    def __init__(self, input_size, hidden_size, num_layers):
         super(BLSTM, self).__init__()
         self.layer = nn.LSTM(
-            input_size, hidden_size, num_layers=num_layers, bidirectional=True
+            input_size,
+            hidden_size,
+            num_layers=num_layers,
+            bidirectional=True,
+            batch_first=True,
         )
 
     def forward(self, x):
         return self.layer(x)
 
 
-class Attention(nn.Module):
-    def __init__(self, feature_size):
-        super(Attention, self).__init__()
-        self.feature_size = feature_size
-
-        # Linear transformations for Q, K, V from the same source
-        self.key = nn.Linear(feature_size, feature_size)
-        self.query = nn.Linear(feature_size, feature_size)
-        self.value = nn.Linear(feature_size, feature_size)
-
-    def forward(self, x, mask=None):
-        # Apply linear transformations
-        keys = self.key(x)
-        queries = self.query(x)
-        values = self.value(x)
-
-        # Scaled dot-product attention
-        scores = torch.matmul(queries, keys.transpose(-2, -1)) / torch.sqrt(
-            torch.tensor(self.feature_size, dtype=torch.float32)
+class AuxiliaryDecoder(nn.Module):
+    def __init__(
+        self, in_size, hidden_size, num_layers, source_target_input_size, dropout_prob
+    ):
+        super(AuxiliaryDecoder, self).__init__()
+        self.lstm = nn.LSTM(
+            in_size,
+            hidden_size,
+            num_layers=num_layers,
+            bidirectional=False,
+            batch_first=True,
         )
-
-        # Apply mask (if provided)
-        if mask is not None:
-            scores = scores.masked_fill(mask == 0, -1e9)
-
-        # Apply softmax
-        attention_weights = F.softmax(scores, dim=-1)
-
-        # Multiply weights with values
-        output = torch.matmul(attention_weights, values)
-
-        return output, attention_weights
-
-
-class SpeakerEncoder(nn.Module):
-    def __init__(self, input_size, out_size):
-        super(SpeakerEncoder, self).__init__()
-        self.layer = nn.Linear(input_size, out_size)
-        self.norm = nn.LayerNorm(out_size)
+        self.source_projection = nn.Linear(hidden_size, source_target_input_size)
+        self.target_projection = nn.Linear(hidden_size, source_target_input_size)
+        self.dropout = nn.Dropout(dropout_prob)
 
     def forward(self, x):
-        x = self.layer(x)
-        x = self.norm(x)
-        return x
-
-
-class AuxillaryDecoder(nn.Module):
-    def __init__(self, in_size, out_size, n_layers=2):
-        super(AuxillaryDecoder, self).__init__()
-        self.attention = Attention(in_size)
-        self.layers = nn.ModuleList(
-            [
-                nn.LSTM(in_size, out_size, num_layers=n_layers, bidirectional=False)
-                for _ in range(2)
-            ]
-        )
-
-    def forward(self, x):
-        x, _ = self.attention(x)
-
-        for layer in self.layers:
-            x, _ = layer(x)
-
-        return x, x
-
-
-class DecoderWaveforme(nn.Module):
-    def __init__(self, embed_dim, num_heads):
-        super(DecoderWaveforme, self).__init__()
-        self.multihead = MultiheadAttention(embed_dim, num_heads)
-        self.norm = nn.LayerNorm(embed_dim)
-        self.lstm = nn.LSTM(embed_dim, embed_dim, bidirectional=False)
-
-    def forward(self, x, speaker_embedding):
-        x = torch.cat([x, speaker_embedding], dim=-1)
-
-        x, _ = self.multihead(x, x, x)
-
-        x = self.norm(x)
         x, _ = self.lstm(x)
-        return x
+        x = self.dropout(x)
+        source_output = self.source_projection(x)
+        target_output = self.target_projection(x)
+        return source_output, target_output
 
 
 class Translatotron(nn.Module):
     def __init__(
         self,
-        input_size,
-        hidden_size,
-        num_layers=8,
-        feature_size=10,
-        n_fft=512,
-        win_length=400,
-        hop_length=160,
-        power=2,
+        input_size=80,  # Assuming mel spectrogram input
+        encoder_hidden_size=1024,
+        encoder_num_layers=8,
+        decoder_hidden_size=1024,
+        decoder_num_layers=6,
+        aux_decoder_hidden_size=256,
+        aux_decoder_num_layers=2,
+        aux_decoder_source_target_size=8,
+        dropout_prob=0.2,
+        n_fft=1024,
+        win_length=1024,
+        hop_length=256,
     ):
         super(Translatotron, self).__init__()
-        self.encoder = BLSTM(input_size, hidden_size, num_layers)
-        self.speaker_encoder = SpeakerEncoder(hidden_size * 2, feature_size * 2)
-        self.aux_decoder = AuxillaryDecoder(hidden_size * 2, feature_size * 2)
-        self.decoder_waveform = DecoderWaveforme(feature_size * 4, 8)
-
-        self.pre_grif = nn.Linear(40, 257)
-
-        self.griffin_lim = GriffinLim(
-            n_fft=n_fft, win_length=win_length, hop_length=hop_length, power=power
+        self.encoder = BLSTM(input_size, encoder_hidden_size, encoder_num_layers)
+        self.decoder = nn.LSTM(
+            encoder_hidden_size * 2,
+            decoder_hidden_size,
+            num_layers=decoder_num_layers,
+            bidirectional=False,
+            batch_first=True,
+        )
+        self.aux_decoder = AuxiliaryDecoder(
+            encoder_hidden_size * 2,
+            aux_decoder_hidden_size,
+            aux_decoder_num_layers,
+            aux_decoder_source_target_size,
+            dropout_prob,
         )
 
-    def forward(self, x, speaker_embedding=None):
+        self.output_projection = nn.Linear(decoder_hidden_size, n_fft // 2 + 1)
 
-        x, _ = self.encoder(x)
+        self.griffin_lim = GriffinLim(
+            n_fft=n_fft, win_length=win_length, hop_length=hop_length, power=1.0
+        )
 
-        phonem_A, phonem_B = self.aux_decoder(x)
+    def forward(self, x):
+        encoder_output, _ = self.encoder(x)
 
-        if speaker_embedding is None:
-            speaker_embedding = torch.zeros_like(x)
+        decoder_output, _ = self.decoder(encoder_output)
+        spectrogram = self.output_projection(decoder_output)
 
-        speaker_embedding = self.speaker_encoder(speaker_embedding)
+        waveform = self.griffin_lim(spectrogram.transpose(1, 2))
 
-        x = self.decoder_waveform(x, speaker_embedding)
+        aux_source, aux_target = self.aux_decoder(encoder_output)
 
-        x = self.pre_grif(x)
+        return waveform, aux_source, aux_target
 
-        wave = self.griffin_lim(x.transpose(1, 2))
 
-        return wave, phonem_A, phonem_B
+# Hyperparameters
+input_sample_rate = 16000  # For Conversational model
+output_sample_rate = 24000
+learning_rate = 0.002
+encoder_hidden_size = 1024
+encoder_num_layers = 8
+decoder_hidden_size = 1024
+decoder_num_layers = 6
+aux_decoder_hidden_size = 256
+aux_decoder_num_layers = 2
+aux_decoder_source_target_size = 8
+dropout_prob = 0.2
+
+# Create the model
+model = Translatotron(
+    input_size=80,  # Assuming 80-dim mel spectrogram input
+    encoder_hidden_size=encoder_hidden_size,
+    encoder_num_layers=encoder_num_layers,
+    decoder_hidden_size=decoder_hidden_size,
+    decoder_num_layers=decoder_num_layers,
+    aux_decoder_hidden_size=aux_decoder_hidden_size,
+    aux_decoder_num_layers=aux_decoder_num_layers,
+    aux_decoder_source_target_size=aux_decoder_source_target_size,
+    dropout_prob=dropout_prob,
+)
+
+
+x = torch.randn(32, 100, 80)  # (batch_size, sequence_length, input_features)
+waveform, aux_source, aux_target = model(x)
+
+
+print(waveform.shape)
