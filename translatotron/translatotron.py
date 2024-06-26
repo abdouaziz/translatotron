@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchaudio.transforms import GriffinLim
 from IPython.display import Audio
+import os
 
 
 class BLSTM(nn.Module):
@@ -84,9 +85,11 @@ class Translatotron(nn.Module):
         )
 
     def forward(self, x):
+
         encoder_output, _ = self.encoder(x)
 
         decoder_output, _ = self.decoder(encoder_output)
+
         spectrogram = self.output_projection(decoder_output)
 
         waveform = self.griffin_lim(spectrogram.transpose(1, 2))
@@ -95,36 +98,58 @@ class Translatotron(nn.Module):
 
         return waveform, aux_source, aux_target
 
+    @classmethod
+    def from_pretrained(cls, model_path, device='cpu'):
+ 
+        if not model_path.endswith('.pth'):
+            raise ValueError("Model path should have a .pth extension")
 
-# Hyperparameters
-input_sample_rate = 16000  # For Conversational model
-output_sample_rate = 24000
-learning_rate = 0.002
-encoder_hidden_size = 1024
-encoder_num_layers = 8
-decoder_hidden_size = 1024
-decoder_num_layers = 6
-aux_decoder_hidden_size = 256
-aux_decoder_num_layers = 2
-aux_decoder_source_target_size = 8
-dropout_prob = 0.2
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"No file found at {model_path}")
 
-# Create the model
-model = Translatotron(
-    input_size=80,  # Assuming 80-dim mel spectrogram input
-    encoder_hidden_size=encoder_hidden_size,
-    encoder_num_layers=encoder_num_layers,
-    decoder_hidden_size=decoder_hidden_size,
-    decoder_num_layers=decoder_num_layers,
-    aux_decoder_hidden_size=aux_decoder_hidden_size,
-    aux_decoder_num_layers=aux_decoder_num_layers,
-    aux_decoder_source_target_size=aux_decoder_source_target_size,
-    dropout_prob=dropout_prob,
-)
+        # Load the state dict
+        state_dict = torch.load(model_path, map_location=device)
 
+        # Extract model parameters from the state dict
+        model_params = state_dict.get('model_params', {})
 
-x = torch.randn(32, 100, 80)  # (batch_size, sequence_length, input_features)
-waveform, aux_source, aux_target = model(x)
+        # Create a new model instance with the saved parameters
+        model = cls(**model_params)
 
+        # Load the model weights
+        model.load_state_dict(state_dict['model_state_dict'])
 
-print(waveform.shape)
+        model.to(device)
+        model.eval()  # Set the model to evaluation mode
+
+        return model
+
+    def save_pretrained(self, save_directory, model_name="translatotron_model"):
+ 
+        os.makedirs(save_directory, exist_ok=True)
+        save_path = os.path.join(save_directory, f"{model_name}.pth")
+
+        # Prepare the state dict with both the model parameters and weights
+        state_dict = {
+            'model_params': {
+                'input_size': self.encoder.layer.input_size,
+                'encoder_hidden_size': self.encoder.layer.hidden_size,
+                'encoder_num_layers': self.encoder.layer.num_layers,
+                'decoder_hidden_size': self.decoder.hidden_size,
+                'decoder_num_layers': self.decoder.num_layers,
+                'aux_decoder_hidden_size': self.aux_decoder.lstm.hidden_size,
+                'aux_decoder_num_layers': self.aux_decoder.lstm.num_layers,
+                'aux_decoder_source_target_size': self.aux_decoder.source_projection.out_features,
+                'dropout_prob': self.encoder.layer.dropout,
+                'n_fft': self.griffin_lim.n_fft,
+                'win_length': self.griffin_lim.win_length,
+                'hop_length': self.griffin_lim.hop_length,
+            },
+            'model_state_dict': self.state_dict()
+        }
+        
+        print(state_dict)
+
+        # Save the state dict
+        torch.save(state_dict, save_path)
+        print(f"Model saved to {save_path}")
