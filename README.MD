@@ -1,24 +1,8 @@
-Certainly! Here's a comprehensive README.md file for your Translatotron project:
-
-```markdown
 # Translatotron: Direct Speech-to-Speech Translation
 
 This project implements the Translatotron model, a sequence-to-sequence approach for direct speech-to-speech translation without relying on intermediate text representations. The implementation is based on the paper "Direct speech-to-speech translation with a sequence-to-sequence model" by Ye Jia et al.
 
-## Table of Contents
-
-1. [Introduction](#introduction)
-2. [Features](#features)
-3. [Requirements](#requirements)
-4. [Installation](#installation)
-5. [Usage](#usage)
-6. [Model Architecture](#model-architecture)
-7. [Training](#training)
-8. [Evaluation](#evaluation)
-9. [Audio Playback](#audio-playback)
-10. [Contributing](#contributing)
-11. [License](#license)
-
+ 
 ## Introduction
 
 Translatotron is an end-to-end model that directly translates speech from one language to another without intermediate text representations. This implementation provides a PyTorch version of the model along with utilities for training and audio playback.
@@ -43,13 +27,13 @@ Translatotron is an end-to-end model that directly translates speech from one la
 ## Installation
 
 1. Clone this repository:
-   ```
+   ```python
    git clone https://github.com/abdouaziz/translatotron.git
    cd translatotron
    ```
 
 2. Install the required packages:
-   ```
+   ```python
    pip install -r requirements.txt
    ```
 
@@ -72,6 +56,7 @@ waveform, aux_source, aux_target = model(dummy_input)
 
 # Play or save the generated audio
 play_audio(waveform[0], filename="output.wav")
+
 ```
 
 ## Model Architecture
@@ -117,7 +102,6 @@ Evaluate the model using:
 
 1. Speech recognition on the translated output
 2. Human evaluation of translation quality
-3. BLEU scores on the auxiliary text output (if available)
 
 ## Audio Playback
 
