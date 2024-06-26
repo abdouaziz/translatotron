@@ -2,6 +2,10 @@
 
 This project implements the Translatotron model, a sequence-to-sequence approach for direct speech-to-speech translation without relying on intermediate text representations. The implementation is based on the paper "Direct speech-to-speech translation with a sequence-to-sequence model" by Ye Jia et al.
 
+<p align="center">
+  <img src="https://drive.google.com/file/d/1diUEg5BasgP82wsoHMNw4mWh7rqiBt-n/view" width="540" height="280">
+</p>
+
  
 ## Introduction
 
@@ -69,7 +73,7 @@ The Translatotron model consists of:
 4. Spectrogram Generator: Linear projection
 5. Waveform Generator: Griffin-Lim algorithm
 
-For detailed architecture, refer to the original paper.
+For detailed architecture, refer to the original paper : [Direct speech-to-speech translation with a sequence-to-sequence model](https://arxiv.org/abs/1904.06037).
 
 ## Training
 
