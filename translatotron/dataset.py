@@ -1,0 +1,243 @@
+import torch 
+import torch.nn as nn 
+import torchaudio 
+from torch.utils.data import Dataset
+
+import numpy as np 
+from pathlib import Path
+from typing import List , Union 
+
+import librosa
+
+from datasets import load_dataset , Audio
+from log import get_logger , setup_logging
+
+from tokenizer import Tokenizer
+
+setup_logging()
+logger = get_logger("Dataset")
+    
+
+class AudioException(Exception):
+    pass 
+
+
+class AudioProcessing:
+
+    def load_wav(self,file_path:Union[str , Path]):
+        return NotImplementedError(f"This method should be implemented")
+    
+    def amplitude_to_db(self, x , min_db=-100):
+        clip_val = 10**(min_db/20)
+        return 20*np.log10(torch.clamp(x , min=clip_val))
+    
+    def db_to_amplitude(self, x):
+        return 10**(x/20)
+    
+    def normalize(self, x , min_db=-100 , max_abs_val=4):
+        # Normalize x 
+        # centered valours into [-max_abs_val , max_abs_val]
+
+        x = (x-min_db)/-min_db
+        x = 2* max_abs_val*x - max_abs_val
+        x = torch.clip(x, min=-max_abs_val , max=max_abs_val)
+
+    def denormlize(self ,x , min_db=-100 , max_abs_val=4):
+        # centered values between -max_abs_val , max_abs_val
+        # Denormalize to have the x 
+        # Decentralized x 
+        # return x
+        x = torch.clip(x , min=-max_abs_val , max=max_abs_val)
+        x = x * max_abs_val / 2*max_abs_val
+        x = x*-min_db + min_db
+        return x 
+    
+
+
+class AudioConversion(AudioProcessing):
+    def __init__(self ,sampling_rate=22050,n_fft=1024,n_mels=80,fmin=0,
+            fmax=8000 ,window_size=1024, hop_size=256, center=False , min_db=-100 , max_scaled_abs=4):
+        super(AudioConversion,self).__init__()
+        self.sampling_rate = sampling_rate
+        self.n_fft=n_fft
+        self.n_mels=n_mels
+        self.fmin=fmin
+        self.fmax=fmax
+        self.hop_size= hop_size
+        self.window_size = window_size
+        self.center = center
+        self.min_db =min_db
+        self.max_scaled_abs=max_scaled_abs
+
+        self.spec2mel = self._get_spec2mel_proj()
+        self.mel2spec = torch.linalg.pinv(self.spec2mel)
+
+
+    def load_wav(self, file_path):
+
+        if not Path(file_path).exists:
+            raise AudioException(f"The path of audio {file_path} doesnt exist")
+        
+        path_audio = Path(file_path)
+
+        if not path_audio.suffix.lower() in [".mp3" ,".wav" ,".ogg" ,".flax"]:
+            AudioException(f"Unsupported audio format: {path_audio.suffix}")
+
+        try:
+            audio , sr = torchaudio(path_audio)
+
+            if sr != self.sampling_rate:
+                audio = torchaudio.functional.resample(
+                    waveform=audio,
+                    orig_freq=sr,
+                    new_freq=self.sampling_rate
+                ) 
+
+                audio = audio.squee(0)
+
+                sr = self.sampling_rate
+
+            return audio  , sr 
+    
+        except Exception as e :
+            raise AudioException(f"Error of load file audio {e}")
+        
+
+    def _get_spec2mel_proj(self,):
+
+        mel = librosa.filters.mel(
+            sr=self.sampling_rate,
+            n_fft=self.n_fft,
+            n_mels=self.n_mels,
+            fmin=self.fmin,
+            fmax=self.fmax
+        )
+        return torch.from_numpy(mel) 
+
+    
+    def audio2mel(self, audio , do_norm=False):
+
+        if not isinstance(audio, torch.Tensor):
+            audio = torch.tensor(audio, dtype=torch.float32)
+
+        spectrogram = torch.stft(
+                input=audio,
+                n_fft=self.n_fft,
+                hop_length=self.hop_size,
+                win_length=self.window_size,
+                window=torch.hann_window(self.window_size).to(audio.device),
+                center=self.center,
+                pad_mode="reflect",
+                normalized=False,
+                onesided=True,
+                return_complex=True,
+            )
+        
+        spectrogram = torch.abs(spectrogram)
+
+        mel = torch.matmul(self.spec2mel.to(spectrogram.device) , spectrogram)
+
+        mel = self.amplitude_to_db(mel , min_db=self.min_db)
+
+        if do_norm:
+            mel = self.normalize(mel , min_db=self.min_db , max_abs_val=self.max_scaled_abs)
+
+        return mel 
+    
+
+    def mel2audio(self,mel , do_denorm=False , griffin_lim_iters=60):
+
+        if do_denorm:
+
+            mel = self.denormlize(mel , min_db=self.min_db , max_abs_val=self.max_scaled_abs)
+
+        mel = self.db_to_amplitude(mel)
+
+        spectogram = torch.matmul(self.mel2spec(mel.device) , mel).cpu().numpy()
+
+        audio = librosa.griffinlim(
+            S=spectogram,
+            n_iter=griffin_lim_iters ,
+            hop_length=self.hop_size,
+            win_length=self.window_size ,
+            n_fft=self.n_fft,
+            window="hann")
+
+        audio *= 32767 / max(0.01, np.max(np.abs(audio)))
+        
+        audio = audio.astype(np.int16)
+
+        return audio
+    
+
+class TTSDataset(Dataset):
+    def __init__(self,dataset_name_or_path ,sampling_rate=22050,n_fft=1024,n_mels=80,fmin=0,fmax=8000,
+                window_size=1024,hop_size=256,center=False,min_db=-100,max_scaled_abs=4 , split="train+validation+test"):
+        
+        try:
+            self.dataset = load_dataset(dataset_name_or_path ,split=split)
+            logger.info(f"dataset {dataset_name_or_path} charged")
+
+        except Exception as e :
+            logger.warning(f"Impossible de load the dataset {dataset_name_or_path} from HF .")
+            raise AudioException(f"Impossible to load the dataset {dataset_name_or_path} witht the split of {split}")
+
+        if self.dataset[0]["audio"]["sampling_rate"] != sampling_rate:
+            self.dataset = self.dataset.cast_column("audio" , Audio(sampling_rate=sampling_rate))
+
+        self.tokenizer = Tokenizer(path_or_name=dataset_name_or_path , sampling_rate=sampling_rate ,split=split)
+
+        self.audio_conversion= AudioConversion(
+            sampling_rate=sampling_rate,
+            n_fft=n_fft,
+            n_mels=n_mels,
+            fmin=fmin,
+            fmax=fmax,
+            window_size=window_size,
+            hop_size=hop_size,
+            center=center,
+            min_db=min_db,
+            max_scaled_abs=max_scaled_abs
+        )
+
+
+    def __len__(self,):
+        return len(self.dataset) 
+
+    def __getitem__(self, idx):
+
+        audio = self.dataset[idx]["audio"]["array"]
+        transcription = self.dataset[idx]["transcription"]
+
+        input_ids = self.tokenizer.encode(text=transcription)
+
+        mel = self.audio_conversion.audio2mel(audio=audio)
+
+        return {
+            "transcription":transcription,
+            "input_ids":torch.tensor(input_ids , dtype=torch.long),
+            "mel":mel
+
+        }
+
+
+
+
+
+if __name__=="__main__":
+
+    from torch.utils.data import DataLoader
+
+    dataset = TTSDataset(
+        dataset_name_or_path="abdouaziiz/alffa"
+    )
+
+    dataloader = DataLoader(dataset=dataset , batch_size=1)
+
+    data = next(iter(dataloader))
+
+
+    print(data)
+
+
+
