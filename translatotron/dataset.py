@@ -13,10 +13,13 @@ from datasets import load_dataset , Audio
 from log import get_logger , setup_logging
 
 from tokenizer import Tokenizer
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 setup_logging()
 logger = get_logger("Dataset")
     
+
 
 class AudioException(Exception):
     pass 
@@ -93,7 +96,7 @@ class AudioConversion(AudioProcessing):
                     new_freq=self.sampling_rate
                 ) 
 
-                audio = audio.squee(0)
+                audio = audio.squeeze(0)
 
                 sr = self.sampling_rate
 
@@ -172,8 +175,8 @@ class AudioConversion(AudioProcessing):
 
 class TTSDataset(Dataset):
     def __init__(self,dataset_name_or_path ,sampling_rate=22050,n_fft=1024,n_mels=80,fmin=0,fmax=8000,
-                window_size=1024,hop_size=256,center=False,min_db=-100,max_scaled_abs=4 , split="train+validation+test"):
-        
+                window_size=1024,hop_size=256,center=False,min_db=-100,max_scaled_abs=4 , split="train+validation+test" , max_duration_in_seconds=30):
+        self.sampling_rate=sampling_rate
         try:
             self.dataset = load_dataset(dataset_name_or_path ,split=split)
             logger.info(f"dataset {dataset_name_or_path} charged")
@@ -184,6 +187,9 @@ class TTSDataset(Dataset):
 
         if self.dataset[0]["audio"]["sampling_rate"] != sampling_rate:
             self.dataset = self.dataset.cast_column("audio" , Audio(sampling_rate=sampling_rate))
+
+
+        self.dataset = self.filter_dataset(max_duration_in_seconds=max_duration_in_seconds)
 
         self.tokenizer = Tokenizer(path_or_name=dataset_name_or_path , sampling_rate=sampling_rate ,split=split)
 
@@ -201,12 +207,22 @@ class TTSDataset(Dataset):
         )
 
 
+    def filter_dataset(self,max_duration_in_seconds):
+        logger.info(f"Filtering Dataset with max duration in second : {max_duration_in_seconds}")
+        try:
+            dataset = self.dataset.filter(lambda x: int(len(x["audio"]["array"])/self.sampling_rate)< max_duration_in_seconds)
+            
+            return dataset
+        except Exception as e :
+            raise AudioException(f"Error filtering dataset ")
+
     def __len__(self,):
         return len(self.dataset) 
 
     def __getitem__(self, idx):
 
         audio = self.dataset[idx]["audio"]["array"]
+
         transcription = self.dataset[idx]["transcription"]
 
         input_ids = self.tokenizer.encode(text=transcription)
@@ -215,7 +231,7 @@ class TTSDataset(Dataset):
 
         return {
             "transcription":transcription,
-            "input_ids":torch.tensor(input_ids , dtype=torch.long),
+            "input_ids":input_ids,
             "mel":mel
 
         }
@@ -237,7 +253,7 @@ if __name__=="__main__":
     data = next(iter(dataloader))
 
 
-    print(data)
+    print(data["input_ids"].shape)
 
 
 
