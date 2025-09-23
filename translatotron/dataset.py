@@ -174,8 +174,18 @@ class AudioConversion(AudioProcessing):
     
 
 class TTSDataset(Dataset):
-    def __init__(self,dataset_name_or_path ,sampling_rate=22050,n_fft=1024,n_mels=80,fmin=0,fmax=8000,
-                window_size=1024,hop_size=256,center=False,min_db=-100,max_scaled_abs=4 , split="train+validation+test" , max_duration_in_seconds=30):
+    def __init__(self,dataset_name_or_path ,
+                 sampling_rate=22050,
+                 n_fft=1024,n_mels=80,
+                 fmin=0,fmax=8000,
+                 window_size=1024,
+                 hop_size=256,
+                 center=False,
+                 min_db=-100,
+                 max_scaled_abs=4 , 
+                 split="train+validation+test" ,
+                 max_duration_in_seconds=30):
+        
         self.sampling_rate=sampling_rate
         try:
             self.dataset = load_dataset(dataset_name_or_path ,split=split)
@@ -188,8 +198,7 @@ class TTSDataset(Dataset):
         if self.dataset[0]["audio"]["sampling_rate"] != sampling_rate:
             self.dataset = self.dataset.cast_column("audio" , Audio(sampling_rate=sampling_rate))
 
-
-        self.dataset = self.filter_dataset(max_duration_in_seconds=max_duration_in_seconds)
+        #self.dataset = self.filter_dataset(max_duration_in_seconds=max_duration_in_seconds)
 
         self.tokenizer = Tokenizer(path_or_name=dataset_name_or_path , sampling_rate=sampling_rate ,split=split)
 
@@ -231,13 +240,65 @@ class TTSDataset(Dataset):
 
         return {
             "transcription":transcription,
-            "input_ids":input_ids,
-            "mel":mel
-
+            "input_ids":input_ids.squeeze(0),
+            "mel":mel.squeeze(0)
         }
 
 
+def build_padding_mask(lengths):
 
+    B = lengths.size(0)
+    T = torch.max(lengths).item()
+
+    mask = torch.zeros(B, T)
+    for i in range(B):
+        mask[i, lengths[i]:] = 1
+
+    return mask.bool()
+
+
+
+def TTSCollator():
+
+    tokenizer = Tokenizer()
+
+    def _collate_fn(batch):
+        
+        texts = [tokenizer.encode(b["transcription"]) for b in batch]
+        mels = [b["mel"] for b in batch]
+        
+        ### Get Lengths of Texts and Mels ###
+        input_lengths = torch.tensor([t.shape[0] for t in texts], dtype=torch.long)
+        output_lengths = torch.tensor([m.shape[1] for m in mels], dtype=torch.long)
+
+        ### Sort by Text Length (as we will be using packed tensors later) ###
+        input_lengths, sorted_idx = input_lengths.sort(descending=True)
+        texts = [texts[i] for i in sorted_idx]
+        mels = [mels[i] for i in sorted_idx]
+        output_lengths = output_lengths[sorted_idx]
+
+        ### Pad Text ###
+        text_padded = torch.nn.utils.rnn.pad_sequence(texts, batch_first=True, padding_value=tokenizer.pad_token_id)
+
+        ### Pad Mel Sequences ###
+        max_target_len = max(output_lengths).item()
+        num_mels = mels[0].shape[0]
+        
+        ### Get gate which tells when to stop decoding. 0 is keep decoding, 1 is stop ###
+        mel_padded = torch.zeros((len(mels), num_mels, max_target_len))
+        gate_padded = torch.zeros((len(mels), max_target_len))
+
+        for i, mel in enumerate(mels):
+            t = mel.shape[1]
+            mel_padded[i, :, :t] = mel
+            gate_padded[i, t-1:] = 1
+        
+        mel_padded = mel_padded.transpose(1,2)
+
+        return text_padded, input_lengths, mel_padded, gate_padded, build_padding_mask(input_lengths), build_padding_mask(output_lengths)
+
+
+    return _collate_fn
 
 
 if __name__=="__main__":
@@ -248,12 +309,12 @@ if __name__=="__main__":
         dataset_name_or_path="abdouaziiz/alffa"
     )
 
-    dataloader = DataLoader(dataset=dataset , batch_size=1)
+    dataloader = DataLoader(dataset=dataset , batch_size=2  , collate_fn=TTSCollator())
 
-    data = next(iter(dataloader))
+    text_padded, input_lengths, mel_padded, gate_padded, encoder_mask, decoder_mask = next(iter(dataloader))
 
+    print(mel_padded.shape)
 
-    print(data["input_ids"].shape)
 
 
 

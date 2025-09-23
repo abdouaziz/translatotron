@@ -103,10 +103,13 @@ class Tokenizer:
     def encode(self, text, return_tensor=True):
 
         tokens = [self.char2id.get(char, self.unk_token_id) for char in text] + [self.eos_token_id]
+
         if return_tensor:
             tokens = torch.tensor(tokens, dtype=torch.long)
+        
         return tokens
     
+
     def decode(self, token_ids, include_special_tokens=False):
 
         chars = []
