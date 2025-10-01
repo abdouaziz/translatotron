@@ -257,7 +257,6 @@ def build_padding_mask(lengths):
     return mask.bool()
 
 
-
 def TTSCollator():
 
     tokenizer = Tokenizer()
